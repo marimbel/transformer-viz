@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside a Transformer — watch one learn</title>
+<meta name="description" content="Interactive visual explainer: a small GPT-style transformer trains live in your browser. Explore the architecture, attention, neurons, parameters, and the training loop.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">Inside a <span>Transformer</span></a>
+    <a class="link" href="#data"><b>01</b>Data</a>
+    <a class="link" href="#arch"><b>02</b>Architecture</a>
+    <a class="link" href="#attention"><b>03</b>Attention</a>
+    <a class="link" href="#neurons"><b>04</b>Neurons</a>
+    <a class="link" href="#training"><b>05</b>Training</a>
+    <a class="link" href="#scale"><b>06</b>Scale</a>
+  </div>
+</nav>
+
+<header class="hero wrap" id="top">
+  <div class="eyebrow">Interactive explainer · runs entirely in your browser</div>
+  <h1>Watch a transformer <em>learn</em>, one weight at a time.</h1>
+  <p class="lead">This page holds a real, tiny GPT-style transformer. Press train and it learns to predict the next character of a text, using the same recipe as large language models: embeddings, self-attention, MLPs, a loss, backpropagation and an optimizer. Every picture below is drawn from the live model.</p>
+  <div class="hero-stats">
+    <div class="stat"><div class="k">Parameters</div><div class="v" id="h-params">–</div></div>
+    <div class="stat"><div class="k">Layers × heads</div><div class="v" id="h-layers">–</div></div>
+    <div class="stat"><div class="k">Vocabulary</div><div class="v" id="h-vocab">–</div></div>
+    <div class="stat"><div class="k">Context</div><div class="v" id="h-ctx">–</div></div>
+  </div>
+  <div class="row">
+    <button class="primary" id="hero-train">▶ Start training</button>
+    <a class="btn" href="#data" style="text-decoration:none">Follow the data first ↓</a>
+  </div>
+  <div class="roadmap">
+    <a href="#data">1 · Text becomes numbers</a>
+    <a href="#arch">2 · The architecture</a>
+    <a href="#attention">3 · Tokens connect via attention</a>
+    <a href="#neurons">4 · Neurons and weights</a>
+    <a href="#training">5 · The training loop</a>
+    <a href="#scale">6 · From toy to GPT-3</a>
+  </div>
+</header>
+
+<!-- ============ 01 DATA ============ -->
+<section class="sec" id="data">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">01 · Data pipeline</div>
+      <h2>From text to numbers</h2>
+      <p>A model can't read letters. Training text is split into <b>tokens</b> (here, single characters), each token gets an integer <b>ID</b>, and each ID looks up a learned vector called an <b>embedding</b>. The training task is simple: given the tokens so far, predict the next one.</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3>Training corpus</h3>
+        <p class="sub">Edit the text and press apply. A new vocabulary and a fresh, untrained model are built from it.</p>
+        <textarea id="corpus" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button id="corpus-apply">Apply corpus &amp; reset model</button>
+          <span class="note" id="corpus-info"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Vocabulary <span class="note" id="vocab-count"></span></h3>
+        <p class="sub">Every distinct character becomes a token. The small number is its ID: the row it reads from the embedding table.</p>
+        <div class="tokens vocab" id="vocab"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <div class="row">
+        <h3 style="margin:0">One training example</h3>
+        <span class="spacer"></span>
+        <span class="note" id="ex-src">random window from the corpus</span>
+        <button id="ex-next">New example</button>
+      </div>
+      <p class="sub" style="margin-top:8px">A window of <span class="mono" id="ex-len">16</span> tokens is cut from the text. The target is the same window shifted one step left, so every position is a separate "guess the next character" exercise. The green bar shows how much probability the model currently gives the right answer.</p>
+      <div class="pair-grid" id="ex-grid"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h3>Token embedding + position embedding = model input</h3>
+      <p class="sub">Each row is one position of the example above; each column is one of the <span class="mono">d_model</span> dimensions. Attention has no built-in sense of order, so a learned position vector is added. Hover a cell for its value. These tables are parameters: watch them change while the model trains.</p>
+      <div class="heat-row" id="emb-row">
+        <div class="heat-box"><canvas class="heat" id="emb-tok"></canvas><div class="cap"><b>token embedding</b> · tok_emb[id]</div></div>
+        <div class="op">+</div>
+        <div class="heat-box"><canvas class="heat" id="emb-pos"></canvas><div class="cap"><b>position embedding</b> · pos_emb[t]</div></div>
+        <div class="op">=</div>
+        <div class="heat-box"><canvas class="heat" id="emb-sum"></canvas><div class="cap"><b>input x₀</b> · goes into block 1</div></div>
+      </div>
+      <div class="legend" style="margin-top:10px">negative<span class="ramp"></span>positive · each map scaled to its own largest value</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 ARCHITECTURE ============ -->
+<section class="sec" id="arch">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">02 · Architecture</div>
+      <h2>The transformer, block by block</h2>
+      <p>This is a <b>decoder-only</b> transformer, the GPT design. The original 2017 transformer paired an encoder with a decoder for translation; GPT models keep only the decoder stack and train it to predict the next token. Click any block to see its job, the shape of the data flowing through it, and the parameters it owns. During training, the forward pass lights up <span style="color:var(--blue)">blue</span> going up and the backward pass <span style="color:var(--orange)">orange</span> coming down.</p>
+    </div>
+    <div class="grid g-arch">
+      <div class="card"><svg id="arch-svg"></svg></div>
+      <div class="card" id="arch-detail"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <div class="row"><h3 style="margin:0">Model size</h3><span class="spacer"></span><span class="note">Changing these rebuilds an untrained model.</span></div>
+      <div class="row" style="margin-top:12px; align-items:flex-end">
+        <label class="ctl">d_model (width) <span class="val" id="cfg-d-v"></span><select id="cfg-d"><option>16</option><option selected>32</option><option>48</option><option>64</option></select></label>
+        <label class="ctl">heads <select id="cfg-h"><option>1</option><option selected>2</option><option>4</option></select></label>
+        <label class="ctl">layers <select id="cfg-l"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+        <label class="ctl">d_ff (MLP width) <select id="cfg-f"><option>32</option><option selected>64</option><option>128</option></select></label>
+        <label class="ctl">context length <select id="cfg-t"><option>8</option><option selected>16</option><option>24</option><option>32</option></select></label>
+        <button id="cfg-apply">Rebuild model</button>
+      </div>
+      <div style="margin-top:16px">
+        <div class="stack" id="pstack"></div>
+        <div class="legend" id="plegend"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 ATTENTION ============ -->
+<section class="sec" id="attention">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">03 · Self-attention</div>
+      <h2>How tokens connect to each other</h2>
+      <p>Attention is how information moves <i>between</i> positions. Each token makes a <b>query</b> ("what am I looking for?"), a <b>key</b> ("what do I contain?") and a <b>value</b> ("what I'll pass along"). The score between two tokens is <code>q·k / √d_head</code>; a softmax turns each row of scores into weights that add up to 1. Because the model predicts the future, a token may only look at itself and earlier tokens (the <b>causal mask</b>). Untrained, the weights are near-uniform; after training, heads specialize.</p>
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="row">
+        <label class="ctl" style="flex:1; min-width:220px">Input text (characters outside the vocabulary are skipped)<input type="text" id="attn-text" value="the robot picks up"></label>
+        <label class="ctl">Layer <select id="attn-layer"></select></label>
+        <label class="ctl">Head <select id="attn-head"></select></label>
+      </div>
+    </div>
+    <div class="grid g-attn">
+      <div class="card">
+        <h3>Connections for the selected token</h3>
+        <p class="sub">Top row: the token doing the looking (query). Bottom row: the tokens it can see (keys). Line thickness = attention weight. Click a top token to select it.</p>
+        <svg id="attn-svg"></svg>
+      </div>
+      <div class="card">
+        <h3>Attention matrix</h3>
+        <p class="sub">Row = query position, column = key position. The blank upper triangle is the causal mask.</p>
+        <canvas class="heat" id="attn-heat"></canvas>
+        <div class="legend" style="margin-top:8px">0 <span class="ramp" style="background:linear-gradient(90deg,var(--mid),var(--orange))"></span> 1</div>
+        <h3 style="margin-top:18px">Model's guess for the next character</h3>
+        <p class="sub">After the selected token, from the final output layer.</p>
+        <div class="pred-list" id="attn-pred"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h3>Every head at once</h3>
+      <p class="sub">Each layer has several heads running in parallel on the same input. Click one to inspect it above.</p>
+      <div class="mini-grid" id="attn-minis"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 NEURONS ============ -->
+<section class="sec" id="neurons">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">04 · Neurons &amp; connections</div>
+      <h2>Inside the MLP: nodes and weights</h2>
+      <p>After attention mixes information across positions, each position goes through a small neural network on its own: expand from <code>d_model</code> to <code>d_ff</code> neurons, apply ReLU (negative values become 0), and project back. Each circle is a <b>neuron</b> holding one number for the selected token. Each line is a <b>weight</b>, one learnable parameter. Training adjusts those lines.</p>
+    </div>
+    <div class="card">
+      <div class="row">
+        <label class="ctl">Layer <select id="nn-layer"></select></label>
+        <label class="ctl">Show lines as
+          <span class="seg" id="nn-mode"><button data-m="w" class="on">weights</button><button data-m="s">signal (weight × activation)</button></span>
+        </label>
+        <label class="ctl" style="width:200px">Strongest lines shown <span class="val" id="nn-dens-v">6%</span><input type="range" id="nn-dens" min="2" max="100" value="6"></label>
+        <span class="spacer"></span>
+        <div class="legend"><span><i style="background:var(--blue)"></i>positive</span><span><i style="background:var(--orange)"></i>negative</span><span><i style="background:#fff"></i>bright node = large activation</span></div>
+      </div>
+      <div style="margin:12px 0 6px" class="row"><span class="note">Token:</span><div class="tokens" id="nn-tokens"></div></div>
+      <canvas id="nn-canvas"></canvas>
+      <p class="note" id="nn-info" style="margin-top:8px">Hover a neuron to isolate its connections.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 TRAINING ============ -->
+<section class="sec" id="training">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">05 · Training</div>
+      <h2>The training loop</h2>
+      <p>Training repeats five steps thousands of times. Use <b>Step through</b> to walk one iteration phase by phase, or <b>Train</b> to run continuously and watch the loss fall. The loss is <b>cross-entropy</b>: the negative log of the probability the model gave the correct next character. Guessing uniformly at random scores <code>ln(vocab size)</code>.</p>
+    </div>
+
+    <div class="loop" id="loop">
+      <div class="phase" data-p="0"><div class="n">1</div><div class="t">Sample a batch</div><div class="d">Cut random windows from the corpus: inputs and shifted targets.</div></div>
+      <div class="phase" data-p="1"><div class="n">2</div><div class="t">Forward pass</div><div class="d">Run inputs through every layer to get a score for each possible next token.</div></div>
+      <div class="phase" data-p="2"><div class="n">3</div><div class="t">Compute loss</div><div class="d">Softmax the scores; loss = −log p(correct token), averaged.</div></div>
+      <div class="phase back" data-p="3"><div class="n">4</div><div class="t">Backward pass</div><div class="d">Backpropagation: the chain rule gives ∂loss/∂w for every weight.</div></div>
+      <div class="phase" data-p="4"><div class="n">5</div><div class="t">Update weights</div><div class="d">Adam nudges every weight against its gradient, scaled by the learning rate.</div></div>
+    </div>
+    <div class="explain" id="explain">Press <b>Step through</b> to run one iteration slowly, or <b>Train</b> to run continuously.</div>
+
+    <div class="card" style="margin-top:18px">
+      <div class="row" style="align-items:flex-end">
+        <button class="primary" id="t-run">▶ Train</button>
+        <button id="t-step">Step through ▸</button>
+        <button class="ghost" id="t-reset">Reset weights</button>
+        <span class="spacer"></span>
+        <label class="ctl" style="width:170px">Learning rate <span class="val" id="lr-v"></span><input type="range" id="lr" min="-4" max="-1.5" step="0.05" value="-2.5"></label>
+        <label class="ctl" style="width:140px">Batch size <span class="val" id="bs-v"></span><input type="range" id="bs" min="1" max="32" step="1" value="8"></label>
+        <label class="ctl" style="width:140px">Speed (steps/frame) <span class="val" id="sp-v"></span><input type="range" id="sp" min="1" max="8" step="1" value="2"></label>
+      </div>
+      <div class="kpis" style="margin-top:16px">
+        <div class="kpi"><div class="k">Step</div><div class="v" id="k-step">0</div></div>
+        <div class="kpi"><div class="k">Loss (smoothed)</div><div class="v" id="k-loss">–</div></div>
+        <div class="kpi"><div class="k">Random-guess loss</div><div class="v" id="k-base">–</div></div>
+        <div class="kpi"><div class="k">Tokens seen</div><div class="v" id="k-tok">0</div></div>
+        <div class="kpi"><div class="k">Gradient norm</div><div class="v" id="k-gn">–</div></div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:18px">
+      <div class="card">
+        <h3>Loss curve</h3>
+        <p class="sub">Faint line: each batch. Solid line: moving average. Dashed: random guessing. Hover for values.</p>
+        <canvas id="loss-canvas"></canvas>
+      </div>
+      <div class="card">
+        <h3>Current batch: what the model sees</h3>
+        <p class="sub">The last sequence of the latest batch. Green bar = probability given to the correct next character.</p>
+        <div class="pair-grid" id="batch-grid"></div>
+        <h3 style="margin-top:16px">Generated text</h3>
+        <p class="sub">Every 150 steps the model writes from a prompt, feeding each sampled character back in.</p>
+        <div class="row" style="margin-bottom:8px">
+          <input type="text" id="gen-prompt" value="the " style="width:120px">
+          <label class="ctl" style="width:140px; flex-direction:row; align-items:center">temp <input type="range" id="gen-temp" min="0.1" max="1.5" step="0.05" value="0.7"> <span class="val" id="gen-temp-v">0.7</span></label>
+          <button id="gen-btn">Generate now</button>
+        </div>
+        <div class="samples" id="samples"></div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:18px">
+      <div class="card">
+        <h3>Gradient size per parameter</h3>
+        <p class="sub">The L2 norm of ∂loss/∂w for each weight matrix in the latest step: how hard each part is being pushed. Global norm is clipped at 1.0 before the update.</p>
+        <div class="legend" id="g-legend" style="margin-bottom:8px"></div>
+        <div class="gbars" id="gbars"></div>
+      </div>
+      <div class="card">
+        <div class="row"><h3 style="margin:0">Weights, gradients, updates</h3><span class="spacer"></span><select id="pm-sel"></select></div>
+        <p class="sub" style="margin-top:8px">A parameter matrix, the gradient the backward pass computed for it, and the change the optimizer applied in the last step.</p>
+        <div class="heat-row" style="flex-wrap:wrap">
+          <div class="heat-box"><canvas class="heat" id="pm-w"></canvas><div class="cap"><b>weights W</b> <span id="pm-w-s"></span></div></div>
+          <div class="heat-box"><canvas class="heat" id="pm-g"></canvas><div class="cap"><b>gradient ∂L/∂W</b> <span id="pm-g-s"></span></div></div>
+          <div class="heat-box"><canvas class="heat" id="pm-d"></canvas><div class="cap"><b>last update ΔW</b> <span id="pm-d-s"></span></div></div>
+        </div>
+        <p class="note" id="pm-desc" style="margin-top:8px"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 06 SCALE ============ -->
+<section class="sec" id="scale">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">06 · Scale</div>
+      <h2>From this toy to a large language model</h2>
+      <p>Large models use the same blocks; they're just wider, deeper and trained on far more tokens. Nearly all parameters live in the attention and MLP matrices, which grow with <code>d_model²</code>. Pick a preset or drag the sliders.</p>
+    </div>
+    <div class="card">
+      <div class="row" id="presets"></div>
+      <div class="calc-ctl" style="margin-top:16px">
+        <label class="ctl">vocabulary <span class="val" id="c-v-v"></span><input type="range" id="c-v" min="0" max="7" step="1"></label>
+        <label class="ctl">context length <span class="val" id="c-t-v"></span><input type="range" id="c-t" min="0" max="8" step="1"></label>
+        <label class="ctl">d_model <span class="val" id="c-d-v"></span><input type="range" id="c-d" min="0" max="14" step="1"></label>
+        <label class="ctl">layers <span class="val" id="c-l-v"></span><input type="range" id="c-l" min="1" max="128" step="1"></label>
+      </div>
+      <div class="grid g2" style="margin-top:20px">
+        <div>
+          <div class="note">Total parameters</div>
+          <div class="big-num" id="c-total">–</div>
+          <div class="stack" id="c-stack" style="height:18px; margin-top:12px"></div>
+          <div class="legend" id="c-legend"></div>
+        </div>
+        <div>
+          <table class="ptab">
+            <tr><th>Rule of thumb</th><th style="text-align:right">Value</th></tr>
+            <tr><td>Memory for weights in 16-bit (2 bytes each)</td><td class="n" id="c-mem">–</td></tr>
+            <tr><td>Training compute per token ≈ 6 × params</td><td class="n" id="c-flop">–</td></tr>
+            <tr><td>Size vs. the model on this page</td><td class="n" id="c-ratio">–</td></tr>
+          </table>
+          <div class="formula" style="margin-top:12px">params ≈ V·d + T·d + L·(12d² + 13d) + 2d<br><span class="note">embeddings + positions + per-block attention (4d²) and MLP (8d², with d_ff = 4d) + LayerNorms. Output layer shares the token embedding (weight tying), as in GPT-2.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Built from scratch in plain JavaScript: a small matrix autograd engine, a GPT-style model (pre-LayerNorm, causal multi-head attention, ReLU MLP) and the Adam optimizer with gradient clipping. No ML libraries, no server: everything above runs and trains in this tab.</p>
+    <p class="note">Simplifications vs. production LLMs: character tokens instead of subword (BPE) tokens, ReLU instead of GELU, no dropout, tiny size, single-example batches processed sequentially.</p>
+  </div>
+</footer>
+
+<div class="dock" id="dock">
+  <span class="dot" id="d-dot"></span>
+  <span class="m">step <b id="d-step">0</b></span>
+  <span class="m">loss <b id="d-loss">–</b></span>
+  <canvas id="d-spark"></canvas>
+  <span class="m hide-sm" id="d-sps"></span>
+  <button class="primary" id="d-run">▶ Train</button>
+</div>
+<div id="tip"></div>
+
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
